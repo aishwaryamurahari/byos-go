@@ -2,6 +2,7 @@ package utils
 
 import (
 	"bufio"
+	"strconv"
 	"strings"
 )
 
@@ -53,6 +54,16 @@ func ParseRequest(data string) (*HTTPRequest, error) {
 			key := strings.TrimSpace(headerParts[0])
 			value := strings.TrimSpace(headerParts[1])
 			req.Headers[key] = value
+		}
+	}
+
+	// Read body based on Content-Length
+	if lengthStr, ok := req.Headers["Content-Length"]; ok {
+		length, err := strconv.Atoi(lengthStr)
+		if err == nil && length > 0 {
+			bodyBuf := make([]byte, length)
+			reader.Read(bodyBuf)
+			req.Body = string(bodyBuf)
 		}
 	}
 
