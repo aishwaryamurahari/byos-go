@@ -4,11 +4,15 @@ import (
 	"byos-go/routes"
 	"byos-go/server"
 	"byos-go/utils"
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 )
 
 func main() {
@@ -21,11 +25,26 @@ func main() {
 
 	fmt.Println("Server listening on http://localhost:8080")
 
+	// Set up signal handling for graceful shutdown
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		<-ctx.Done()
+		fmt.Println("\nShutting down gracefully...")
+		listener.Close() // stop accepting new connections
+	}()
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Printf("Error accepting connection: %v", err)
-			continue
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				log.Printf("Error accepting connection: %v", err)
+				continue
+			}
 		}
 
 		// Handle each connection in a new goroutine (like a lightweight thread)
@@ -35,15 +54,6 @@ func main() {
 
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
-
-	// buffer := make([]byte, 4096)
-	// n, err := conn.Read(buffer)
-	// if err != nil {
-	// 	log.Printf("Error reading data: %v", err)
-	// 	return
-	// }
-
-	// request := string(buffer[:n])
 
 	var requestData strings.Builder
 	tempBuf := make([]byte, 1024)
@@ -95,10 +105,19 @@ func handleConnection(conn net.Conn) {
 		}
 		return
 	}
+	// Match dynamic routes
+	if dynamicHandler, params, found := routes.MatchDynamicRoute(parsed.Method, parsed.Path); found {
+		//params["body"] = parsed.Body
+		contentType, body := dynamicHandler(parsed, params)
+		response := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
+			contentType, len(body), body)
+		conn.Write([]byte(response))
+		return
+	}
 
 	handler, exists := routes.MatchRoute(parsed.Method, parsed.Path)
 	if exists {
-		contentType, body := handler()
+		contentType, body := handler(parsed, map[string]string{})
 		response := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
 			contentType, len(body), body)
 		conn.Write([]byte(response))
@@ -108,4 +127,5 @@ func handleConnection(conn net.Conn) {
 			len(body), body)
 		conn.Write([]byte(response))
 	}
+
 }
